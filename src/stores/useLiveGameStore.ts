@@ -36,6 +36,7 @@ export const useLiveGameStore = defineStore('liveGame', () => {
   const baseScore = ref<number>(100);
   const pointScore = ref<number>(30);
   const mySeatIndex = ref<number>(0);
+  const maxFanCap = ref<number>(0); // 0 代表不封頂，8 代表八台滿貫，16 代表十六台滿貫
 
   const players = ref<Player[]>([
     { id: 0, name: '東家', score: 0 },
@@ -50,7 +51,9 @@ export const useLiveGameStore = defineStore('liveGame', () => {
   const dealerStreak = ref<number>(0);
   const logs = ref<RoundLog[]>([]);
 
-  // 1. 初始化讀取本地快取
+  // 牌桌專屬 4 位數同步房號
+  const roomCode = ref<string>(Math.floor(1000 + Math.random() * 9000).toString());
+
   const savedSettings = localStorage.getItem(LIVE_TABLE_SETTINGS_KEY);
   if (savedSettings) {
     try {
@@ -58,6 +61,7 @@ export const useLiveGameStore = defineStore('liveGame', () => {
       if (parsed.baseScore !== undefined) baseScore.value = Number(parsed.baseScore) || 0;
       if (parsed.pointScore !== undefined) pointScore.value = Number(parsed.pointScore) || 0;
       if (typeof parsed.mySeatIndex === 'number') mySeatIndex.value = parsed.mySeatIndex;
+      if (typeof parsed.maxFanCap === 'number') maxFanCap.value = parsed.maxFanCap;
       if (Array.isArray(parsed.playerNames)) {
         parsed.playerNames.forEach((name: string, i: number) => {
           if (players.value[i] && name) players.value[i].name = name;
@@ -80,16 +84,10 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     }
   }
 
-  // 2. 從 Supabase 載入台數規則與牌桌 Session
   async function fetchCloudLiveSettings() {
     if (!authStore.user) return;
-
     try {
-      // 載入自訂台數規則
-      const { data: rulesData } = await supabase
-        .from('user_fan_rules')
-        .select('*');
-
+      const { data: rulesData } = await supabase.from('user_fan_rules').select('*');
       if (rulesData && rulesData.length > 0) {
         fanRules.value = rulesData.map((r: any) => ({
           id: r.rule_key,
@@ -101,7 +99,6 @@ export const useLiveGameStore = defineStore('liveGame', () => {
         localStorage.setItem(LIVE_FAN_RULES_KEY, JSON.stringify(fanRules.value));
       }
 
-      // 載入牌桌 Session
       const { data: sessionData } = await supabase
         .from('live_game_sessions')
         .select('*')
@@ -123,7 +120,6 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     }
   }
 
-  // 3. 同步當前牌桌狀態至 Supabase
   async function syncSessionToCloud() {
     if (!authStore.user) return;
     try {
@@ -144,26 +140,16 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     }
   }
 
-  const currentRoundName = computed(() => {
-    return `${WINDS[currentWindIndex.value]}風${WINDS[currentDealerIndex.value]}`;
-  });
+  const currentRoundName = computed(() => `${WINDS[currentWindIndex.value]}風${WINDS[currentDealerIndex.value]}`);
+  const currentDealerFan = computed(() => dealerStreak.value * 2 + 1);
+  const myPlayer = computed(() => players.value[mySeatIndex.value] || players.value[0]);
+  const activeFanRules = computed(() => fanRules.value.filter((r) => r.enabled));
 
-  const currentDealerFan = computed(() => {
-    return dealerStreak.value * 2 + 1;
-  });
-
-  const myPlayer = computed(() => {
-    return players.value[mySeatIndex.value] || players.value[0];
-  });
-
-  const activeFanRules = computed(() => {
-    return fanRules.value.filter((r) => r.enabled);
-  });
-
-  function saveTableSettings(newBase: number, newPoint: number, names: string[], mySeat: number) {
+  function saveTableSettings(newBase: number, newPoint: number, names: string[], mySeat: number, fanCap: number = 0) {
     baseScore.value = Number(newBase) || 0;
     pointScore.value = Number(newPoint) || 0;
     mySeatIndex.value = mySeat >= 0 && mySeat <= 3 ? mySeat : 0;
+    maxFanCap.value = Number(fanCap) || 0;
 
     names.forEach((name, i) => {
       if (players.value[i]) {
@@ -177,6 +163,7 @@ export const useLiveGameStore = defineStore('liveGame', () => {
         baseScore: baseScore.value,
         pointScore: pointScore.value,
         mySeatIndex: mySeatIndex.value,
+        maxFanCap: maxFanCap.value,
         playerNames: players.value.map((p) => p.name)
       })
     );
@@ -188,7 +175,6 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     fanRules.value = rules;
     localStorage.setItem(LIVE_FAN_RULES_KEY, JSON.stringify(rules));
 
-    // 同步到 Supabase user_fan_rules
     if (authStore.user) {
       try {
         const rows = rules.map((r) => ({
@@ -199,10 +185,9 @@ export const useLiveGameStore = defineStore('liveGame', () => {
           enabled: r.enabled,
           is_custom: !!r.isCustom
         }));
-
         await supabase.from('user_fan_rules').upsert(rows, { onConflict: 'user_id,rule_key' });
       } catch (err) {
-        console.error('儲存台數規則至雲端失敗:', err);
+        console.error('儲存台數規則失敗:', err);
       }
     }
   }
@@ -232,13 +217,18 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     loserIndex: number;
     fanCount: number;
     tags: string[];
+    isBaoPai?: boolean;
+    baoPlayerIndex?: number;
   }) {
-    const { winnerIndex, loserIndex, fanCount, tags } = payload;
+    const { winnerIndex, loserIndex, fanCount, tags, isBaoPai, baoPlayerIndex } = payload;
     const isSelfDrawn = loserIndex === -1;
-    const isDealerInvolved =
-      winnerIndex === currentDealerIndex.value || loserIndex === currentDealerIndex.value;
+    const isDealerInvolved = winnerIndex === currentDealerIndex.value || loserIndex === currentDealerIndex.value || (isBaoPai && baoPlayerIndex === currentDealerIndex.value);
 
-    const effectiveFan = fanCount + (isDealerInvolved ? currentDealerFan.value : 0);
+    let effectiveFan = fanCount + (isDealerInvolved ? currentDealerFan.value : 0);
+    if (maxFanCap.value > 0 && effectiveFan > maxFanCap.value) {
+      effectiveFan = maxFanCap.value;
+    }
+
     const singlePayment = Number(baseScore.value) + effectiveFan * Number(pointScore.value);
 
     const snapshotScores = players.value.map((p) => p.score);
@@ -248,7 +238,14 @@ export const useLiveGameStore = defineStore('liveGame', () => {
 
     let amountWon = 0;
 
-    if (isSelfDrawn) {
+    if (isBaoPai && typeof baoPlayerIndex === 'number' && baoPlayerIndex >= 0) {
+      // 包牌：該包牌玩家一人獨扛 3 份
+      const fullAmount = singlePayment * 3;
+      players.value[baoPlayerIndex].score -= fullAmount;
+      players.value[winnerIndex].score += fullAmount;
+      amountWon = fullAmount;
+    } else if (isSelfDrawn) {
+      // 正常自摸：三家各付一份
       players.value.forEach((p, idx) => {
         if (idx !== winnerIndex) {
           p.score -= singlePayment;
@@ -257,6 +254,7 @@ export const useLiveGameStore = defineStore('liveGame', () => {
       });
       players.value[winnerIndex].score += amountWon;
     } else {
+      // 放槍：一對一支付
       players.value[loserIndex].score -= singlePayment;
       players.value[winnerIndex].score += singlePayment;
       amountWon = singlePayment;
@@ -270,6 +268,7 @@ export const useLiveGameStore = defineStore('liveGame', () => {
       winnerIndex,
       loserIndex,
       isSelfDrawn,
+      isBaoPai: !!isBaoPai,
       baseScore: baseScore.value,
       pointScore: pointScore.value,
       fanCount: effectiveFan,
@@ -342,6 +341,7 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     currentDealerIndex.value = 0;
     dealerStreak.value = 0;
     logs.value = [];
+    roomCode.value = Math.floor(1000 + Math.random() * 9000).toString();
 
     syncSessionToCloud();
   }
@@ -350,8 +350,10 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     baseScore,
     pointScore,
     mySeatIndex,
+    maxFanCap,
     players,
     fanRules,
+    roomCode,
     currentWindIndex,
     currentDealerIndex,
     dealerStreak,

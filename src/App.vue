@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { Plus, Share2, Download, Upload, FileSpreadsheet, MapPin, LayoutDashboard, Disc3, LogIn, LogOut, UserCheck } from 'lucide-vue-next';
+import { 
+  Plus, Share2, Download, Upload, FileSpreadsheet, MapPin, 
+  LayoutDashboard, Disc3, LogIn, LogOut, Settings2,
+  Users, Layers
+} from 'lucide-vue-next';
 import { useRecordStore } from './stores/useRecordStore';
 import { useAuthStore } from './stores/useAuthStore';
 import { useLiveGameStore } from './stores/useLiveGameStore';
@@ -11,18 +15,21 @@ import RecordCard from './components/RecordCard.vue';
 import RecordFormModal from './components/RecordFormModal.vue';
 import ShareModal from './components/ShareModal.vue';
 import LiveGameView from './components/LiveGameView.vue';
-import AuthModal from './components/AuthModal.vue';
+import ProfileModal from './components/ProfileModal.vue';
+import LoginView from './components/LoginView.vue';
 import { formatCurrency, generateLineReport } from './utils/formatters';
 import { supabase } from './utils/supabase';
 
+// 控制主分頁 ('live' | 'ledger') 與 是否展示全螢幕登入頁
 const currentTab = ref<'ledger' | 'live'>('live');
+const isLoginPage = ref(false);
 
 const store = useRecordStore();
 const authStore = useAuthStore();
 const liveStore = useLiveGameStore();
 
 const showModal = ref(false);
-const showAuthModal = ref(false);
+const showProfileModal = ref(false);
 const editingRecord = ref<MahjongRecord | null>(null);
 const showShareModal = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -30,7 +37,6 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const searchQuery = ref('');
 const filterStatus = ref<'all' | 'win' | 'loss'>('all');
 
-// 初始與驗證狀態變更時，全自動抓取所有雲端資料
 async function syncAllData() {
   if (authStore.user) {
     await Promise.all([
@@ -40,14 +46,49 @@ async function syncAllData() {
   }
 }
 
-onMounted(async () => {
-  await authStore.init();
-  await syncAllData();
+async function handleSignOut() {
+  if (window.confirm('確定要登出帳號嗎？')) {
+    await authStore.signOut();
+    store.clearRecordsOnSignOut();
+    isLoginPage.value = true; // 登出後直接帶回專屬登入頁
+  }
+}
 
-  // 監聽登入 / 登出事件 (包括 Google 轉跳完成)
-  supabase.auth.onAuthStateChange(async (_event, session) => {
+// 在 App.vue 的 script setup 區塊修改 onMounted：
+
+onMounted(async () => {
+  // 1. 如果網址帶有 OAuth 回傳的 Hash，先不急著判定未登入，等待 SDK 解析
+  const isOAuthCallback = window.location.hash.includes('access_token=') || window.location.search.includes('code=');
+  if (isOAuthCallback) {
+    isLoginPage.value = false; // 暫時不彈出登入頁，等待解析完成
+  }
+
+  // 2. 初始化認證狀態
+  await authStore.init();
+
+  if (authStore.user) {
+    isLoginPage.value = false;
+    await syncAllData();
+  } else if (!isOAuthCallback) {
+    // 只有在不是 OAuth 回調且真的沒登入的情況下，才進登入頁
+    isLoginPage.value = true;
+  }
+
+  // 3. 監聽 Session 建立（Google 登入完成的關鍵點）
+  supabase.auth.onAuthStateChange(async (event, session) => {
     if (session?.user) {
+      authStore.user = session.user;
+      await authStore.fetchProfile();
+      isLoginPage.value = false; // 登入成功，立即關閉登入頁
       await syncAllData();
+
+      // 清除網址列醜醜的 Hash Token（選用）
+      if (window.location.hash.includes('access_token=')) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    } else if (event === 'SIGNED_OUT') {
+      store.clearRecordsOnSignOut();
+      isLoginPage.value = true;
     }
   });
 });
@@ -68,9 +109,7 @@ const filteredRecords = computed(() => {
   });
 });
 
-const reportText = computed(() => {
-  return generateLineReport(store.stats, store.sortedRecords[0]);
-});
+const reportText = computed(() => generateLineReport(store.stats, store.sortedRecords[0]));
 
 function openCreateModal() {
   editingRecord.value = null;
@@ -104,7 +143,15 @@ function handleFileImport(e: Event) {
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto px-4 py-6 pb-32">
+  <!-- 1. 全螢幕專屬登入頁面 -->
+  <LoginView 
+    v-if="isLoginPage" 
+    @login-success="isLoginPage = false" 
+    @skip-guest="isLoginPage = false" 
+  />
+
+  <!-- 2. 主應用程式畫面 (牌桌計分與個人帳本) -->
+  <div v-else class="max-w-4xl mx-auto px-4 py-6 pb-32">
     <!-- 頂端 Header -->
     <header class="flex flex-wrap items-center justify-between gap-4 mb-6">
       <div>
@@ -115,28 +162,54 @@ function handleFileImport(e: Event) {
       </div>
 
       <div class="flex items-center gap-2">
-        <div v-if="authStore.user" class="flex items-center gap-2 bg-table-800 border border-table-border px-3 py-1.5 rounded-xl text-xs">
-          <UserCheck class="w-3.5 h-3.5 text-gold-400" />
-          <span class="text-gray-200 font-semibold truncate max-w-[100px]">
-            {{ authStore.user.user_metadata?.full_name || authStore.user.email?.split('@')[0] }}
-          </span>
-          <button 
-            @click="authStore.signOut" 
-            class="text-gray-400 hover:text-rose-400 ml-1 p-0.5 transition-colors" 
-            title="登出帳號"
-          >
-            <LogOut class="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <!-- 已登入：顯示玩家頭像稱號 (點擊開啟個人資料設定) -->
+        <div v-if="authStore.user" class="flex items-center gap-1 bg-table-800 border border-table-border p-1 pr-2 rounded-2xl shadow-md">
+  <button
+    @click="showProfileModal = true"
+    class="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-table-700 text-gray-200 hover:text-gold-400 transition-all"
+    title="點擊修改個人稱號與底台"
+  >
+    <!-- 若有 Google 頭像顯示圖片，若無顯示名字首字 -->
+    <div class="w-7 h-7 rounded-full bg-gold-500/20 border border-gold-500/50 overflow-hidden flex items-center justify-center shrink-0">
+      <img
+        v-if="authStore.avatarUrl"
+        :src="authStore.avatarUrl"
+        alt="頭像"
+        class="w-full h-full object-cover"
+        referrerpolicy="no-referrer"
+      />
+      <span v-else class="text-xs font-black text-gold-400">
+        {{ authStore.currentDisplayName ? authStore.currentDisplayName.slice(0, 1) : '🀄' }}
+      </span>
+    </div>
 
+    <!-- 玩家名稱 -->
+    <span class="font-bold text-xs truncate max-w-[100px] sm:max-w-[130px]">
+      {{ authStore.currentDisplayName }}
+    </span>
+    <Settings2 class="w-3.5 h-3.5 text-gray-400 shrink-0" />
+  </button>
+  
+  <!-- 登出按鈕 -->
+  <button 
+    @click="handleSignOut" 
+    class="text-gray-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-table-700/60 transition-colors ml-0.5" 
+    title="登出帳號"
+  >
+    <LogOut class="w-3.5 h-3.5" />
+  </button>
+</div>
+
+        <!-- 訪客/未登入狀態：點擊前往登入頁面 -->
         <button
           v-else
-          @click="showAuthModal = true"
-          class="bg-table-800 hover:bg-table-700 border border-table-border text-xs font-bold text-gold-400 px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+          @click="isLoginPage = true"
+          class="bg-table-800 hover:bg-table-700 border border-table-border text-xs font-bold text-gold-400 px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
         >
           <LogIn class="w-3.5 h-3.5" /> 登入 / 註冊
         </button>
 
+        <!-- 模式切換 Tabs -->
         <div class="flex bg-table-800 border border-table-border p-1 rounded-2xl">
           <button
             @click="currentTab = 'live'"
@@ -159,7 +232,7 @@ function handleFileImport(e: Event) {
     <!-- 牌桌即時計分器 -->
     <LiveGameView v-if="currentTab === 'live'" @switch-to-ledger="currentTab = 'ledger'" />
 
-    <!-- 個人雀歷帳本 -->
+    <!-- 雀歷記帳本內容 -->
     <div v-else class="space-y-6">
       <div class="flex items-center justify-between">
         <div class="flex bg-table-800/90 border border-table-border p-1 rounded-xl text-xs">
@@ -212,6 +285,7 @@ function handleFileImport(e: Event) {
         </div>
       </div>
 
+      <!-- 統計數據 -->
       <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
           title="累計淨勝負"
@@ -237,37 +311,78 @@ function handleFileImport(e: Event) {
         />
       </section>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="md:col-span-2">
-          <TrendChart :data="store.trendPoints" />
-        </div>
-        <div class="bg-table-800/80 border border-table-border p-4 rounded-xl shadow-lg flex flex-col justify-between">
-          <div>
-            <div class="flex items-center gap-1.5 text-xs font-bold text-gold-400 mb-2">
-              <MapPin class="w-4 h-4" /> 風水寶地排行榜
-            </div>
-            <div v-if="store.locationStats.length > 0" class="space-y-2 mt-2">
-              <div
-                v-for="loc in store.locationStats.slice(0, 3)"
-                :key="loc.location"
-                class="flex items-center justify-between text-xs py-1 border-b border-table-border/50 last:border-0"
-              >
-                <div class="truncate max-w-[120px]">
-                  <div class="font-semibold text-gray-200 truncate">{{ loc.location }}</div>
-                  <div class="text-[10px] text-gray-400">{{ loc.matches }} 場 · 勝率 {{ loc.winRate.toFixed(0) }}%</div>
-                </div>
-                <div class="font-mono font-bold" :class="loc.profit > 0 ? 'text-emerald-400' : 'text-rose-400'">
-                  {{ formatCurrency(loc.profit) }}
-                </div>
+      <TrendChart :data="store.trendPoints" />
+
+      <!-- 三大深度切片數據 -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="bg-table-800/80 border border-table-border p-4 rounded-xl shadow-lg">
+          <div class="flex items-center gap-1.5 text-xs font-bold text-gold-400 mb-2">
+            <MapPin class="w-4 h-4" /> 風水寶地榜
+          </div>
+          <div v-if="store.locationStats.length > 0" class="space-y-1.5 mt-2">
+            <div
+              v-for="loc in store.locationStats.slice(0, 3)"
+              :key="loc.location"
+              class="flex items-center justify-between text-xs py-1 border-b border-table-border/40 last:border-0"
+            >
+              <div class="truncate max-w-[120px]">
+                <div class="font-semibold text-gray-200 truncate">{{ loc.location }}</div>
+                <div class="text-[10px] text-gray-400">{{ loc.matches }} 場 · {{ loc.winRate.toFixed(0) }}% 勝</div>
+              </div>
+              <div class="font-mono font-bold" :class="loc.profit > 0 ? 'text-emerald-400' : 'text-rose-400'">
+                {{ formatCurrency(loc.profit) }}
               </div>
             </div>
-            <div v-else class="text-center py-6 text-xs text-gray-500">
-              記帳填寫地點即可自動排行
+          </div>
+          <div v-else class="text-center py-4 text-xs text-gray-500">尚無地點數據</div>
+        </div>
+
+        <div class="bg-table-800/80 border border-table-border p-4 rounded-xl shadow-lg">
+          <div class="flex items-center gap-1.5 text-xs font-bold text-amber-400 mb-2">
+            <Users class="w-4 h-4" /> 牌友合拍/剋星榜
+          </div>
+          <div v-if="store.friendStats.length > 0" class="space-y-1.5 mt-2">
+            <div
+              v-for="fr in store.friendStats.slice(0, 3)"
+              :key="fr.name"
+              class="flex items-center justify-between text-xs py-1 border-b border-table-border/40 last:border-0"
+            >
+              <div class="truncate max-w-[120px]">
+                <div class="font-semibold text-gray-200 truncate">{{ fr.name }}</div>
+                <div class="text-[10px] text-gray-400">{{ fr.matches }} 場同桌</div>
+              </div>
+              <div class="font-mono font-bold" :class="fr.profit > 0 ? 'text-emerald-400' : 'text-rose-400'">
+                {{ formatCurrency(fr.profit) }}
+              </div>
             </div>
           </div>
+          <div v-else class="text-center py-4 text-xs text-gray-500">填入標籤自動分析</div>
+        </div>
+
+        <div class="bg-table-800/80 border border-table-border p-4 rounded-xl shadow-lg">
+          <div class="flex items-center gap-1.5 text-xs font-bold text-emerald-400 mb-2">
+            <Layers class="w-4 h-4" /> 底台規格損益
+          </div>
+          <div v-if="store.stakeStats.length > 0" class="space-y-1.5 mt-2">
+            <div
+              v-for="st in store.stakeStats.slice(0, 3)"
+              :key="st.stake"
+              class="flex items-center justify-between text-xs py-1 border-b border-table-border/40 last:border-0"
+            >
+              <div class="truncate max-w-[120px]">
+                <div class="font-semibold text-gray-200">{{ st.stake }} 底台</div>
+                <div class="text-[10px] text-gray-400">{{ st.matches }} 場 · {{ st.winRate.toFixed(0) }}% 勝</div>
+              </div>
+              <div class="font-mono font-bold" :class="st.profit > 0 ? 'text-emerald-400' : 'text-rose-400'">
+                {{ formatCurrency(st.profit) }}
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-center py-4 text-xs text-gray-500">尚無底台規格數據</div>
         </div>
       </div>
 
+      <!-- 歷史明細 -->
       <section class="space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 class="text-base font-bold text-gray-200">歷史明細 ({{ filteredRecords.length }})</h2>
@@ -319,20 +434,10 @@ function handleFileImport(e: Event) {
       </section>
     </div>
 
-    <RecordFormModal
-      v-if="showModal"
-      :edit-record="editingRecord"
-      @close="showModal = false"
-    />
-    <ShareModal
-      v-if="showShareModal"
-      :report-text="reportText"
-      @close="showShareModal = false"
-    />
-    <AuthModal
-      v-if="showAuthModal"
-      @close="showAuthModal = false"
-    />
+    <!-- 彈窗群 -->
+    <RecordFormModal v-if="showModal" :edit-record="editingRecord" @close="showModal = false" />
+    <ShareModal v-if="showShareModal" :report-text="reportText" @close="showShareModal = false" />
+    <ProfileModal v-if="showProfileModal" @close="showProfileModal = false" />
   </div>
 </template>
 

@@ -36,14 +36,13 @@ export const generateTableBill = (
   logs: RoundLog[]
 ): string => {
   let text = `🀄 【台灣麻將四家對帳單】 🀄\n`;
-  text += `規則：${base} / ${point} 底台 · 總局數：${logs.length} 把\n`;
+  text += `底台：${base} / ${point} · 總局數：${logs.length} 把\n`;
   text += `------------------------\n`;
   players.forEach((p) => {
     const scoreStr = p.score > 0 ? `+${p.score}` : `${p.score}`;
     text += `${p.name}：${scoreStr} 元\n`;
   });
   text += `------------------------\n`;
-  text += `零和校驗：${players.reduce((sum, p) => sum + p.score, 0)} 元 (總和必為0)\n`;
-  text += `牌局順利結束，歡喜結算！ 🍵`;
+  text += `零和驗證差額：${players.reduce((sum, p) => sum + p.score, 0)} 元 (必須為0)\n`;
   return text;
 };

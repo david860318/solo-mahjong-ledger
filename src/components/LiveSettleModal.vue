@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { X, Check, Plus, Minus } from 'lucide-vue-next';
+import { X, Check, Plus, Minus, AlertTriangle } from 'lucide-vue-next';
 import { useLiveGameStore } from '../stores/useLiveGameStore';
 import type { FanRule } from '../types/mahjong';
 
@@ -8,8 +8,10 @@ const emit = defineEmits(['close']);
 const store = useLiveGameStore();
 
 const winnerIndex = ref<number>(0);
-const loserIndex = ref<number>(-1);
+const loserIndex = ref<number>(-1); // -1: 自摸
 const manualFan = ref<number>(0);
+const isBaoPai = ref<boolean>(false);
+const baoPlayerIndex = ref<number>(1);
 
 const selectedRuleIds = ref<string[]>([]);
 
@@ -25,24 +27,32 @@ function toggleRule(rule: FanRule) {
 }
 
 const selectedTags = computed(() => {
-  return selectedRuleIds.value
+  const tags = selectedRuleIds.value
     .map((id) => store.fanRules.find((r) => r.id === id)?.name)
     .filter(Boolean) as string[];
+  if (isBaoPai.value) tags.push(`由${store.players[baoPlayerIndex.value].name}全額包牌`);
+  return tags;
 });
 
 const isDealerBonus = computed(() => {
-  return winnerIndex.value === store.currentDealerIndex || loserIndex.value === store.currentDealerIndex;
+  return winnerIndex.value === store.currentDealerIndex ||
+         loserIndex.value === store.currentDealerIndex ||
+         (isBaoPai.value && baoPlayerIndex.value === store.currentDealerIndex);
 });
+
+const rawFan = computed(() => manualFan.value + (isDealerBonus.value ? store.currentDealerFan : 0));
 
 const totalFan = computed(() => {
-  return manualFan.value + (isDealerBonus.value ? store.currentDealerFan : 0);
+  if (store.maxFanCap > 0 && rawFan.value > store.maxFanCap) {
+    return store.maxFanCap;
+  }
+  return rawFan.value;
 });
 
-const singlePay = computed(() => {
-  return store.baseScore + totalFan.value * store.pointScore;
-});
+const singlePay = computed(() => store.baseScore + totalFan.value * store.pointScore);
 
 const totalIncome = computed(() => {
+  if (isBaoPai.value) return singlePay.value * 3;
   return loserIndex.value === -1 ? singlePay.value * 3 : singlePay.value;
 });
 
@@ -51,7 +61,9 @@ function handleSettle() {
     winnerIndex: winnerIndex.value,
     loserIndex: loserIndex.value,
     fanCount: manualFan.value,
-    tags: [...selectedTags.value]
+    tags: [...selectedTags.value],
+    isBaoPai: isBaoPai.value,
+    baoPlayerIndex: isBaoPai.value ? baoPlayerIndex.value : undefined
   });
   emit('close');
 }
@@ -63,13 +75,14 @@ function handleSettle() {
       <div class="flex items-center justify-between pb-3 border-b border-table-border">
         <div>
           <h2 class="text-lg font-black text-gold-400">牌局胡牌結算 ({{ store.currentRoundName }})</h2>
-          <p class="text-xs text-gray-400">目前莊家：{{ store.players[store.currentDealerIndex].name }} (莊家連莊台 +{{ store.currentDealerFan }}台)</p>
+          <p class="text-xs text-gray-400">目前莊家：{{ store.players[store.currentDealerIndex].name }} (連莊台 +{{ store.currentDealerFan }}台)</p>
         </div>
         <button @click="$emit('close')" class="p-1.5 text-gray-400 hover:text-white rounded-lg bg-table-900/50">
           <X class="w-5 h-5" />
         </button>
       </div>
 
+      <!-- 贏家 -->
       <div class="mt-4">
         <label class="block text-xs font-semibold text-gray-300 mb-1.5">🀄 誰胡牌 (贏家)</label>
         <div class="grid grid-cols-4 gap-2">
@@ -86,8 +99,9 @@ function handleSettle() {
         </div>
       </div>
 
+      <!-- 放槍者 -->
       <div class="mt-4">
-        <label class="block text-xs font-semibold text-gray-300 mb-1.5">🎯 放槍者 (若自摸選「自摸」)</label>
+        <label class="block text-xs font-semibold text-gray-300 mb-1.5">🎯 放槍者 (若自摸請點「自摸」)</label>
         <div class="grid grid-cols-5 gap-1.5">
           <button
             type="button"
@@ -101,9 +115,9 @@ function handleSettle() {
             <button
               v-if="p.id !== winnerIndex"
               type="button"
-              @click="loserIndex = p.id"
+              @click="loserIndex = p.id; isBaoPai = false"
               class="py-2.5 text-xs font-bold rounded-xl border transition-all"
-              :class="loserIndex === p.id ? 'bg-rose-500 border-rose-400 text-white shadow-md font-black' : 'bg-table-900 border-table-border text-gray-300'"
+              :class="loserIndex === p.id && !isBaoPai ? 'bg-rose-500 border-rose-400 text-white shadow-md font-black' : 'bg-table-900 border-table-border text-gray-300'"
             >
               {{ p.name }} 放槍
             </button>
@@ -111,15 +125,44 @@ function handleSettle() {
         </div>
       </div>
 
+      <!-- 包牌快捷設定 -->
+      <div class="mt-3.5 bg-table-900/60 p-3 rounded-xl border border-table-border/60">
+        <div class="flex items-center justify-between">
+          <label class="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+            <AlertTriangle class="w-4 h-4 text-amber-400" /> 特殊狀況：全額包牌 (一人承擔3份)
+          </label>
+          <input type="checkbox" v-model="isBaoPai" class="w-4 h-4 accent-amber-500 rounded cursor-pointer" />
+        </div>
+
+        <div v-if="isBaoPai" class="mt-2.5 pt-2 border-t border-table-border/50">
+          <span class="text-[11px] text-gray-400 block mb-1">哪一位玩家全包賠付？</span>
+          <div class="grid grid-cols-3 gap-2">
+            <template v-for="p in store.players" :key="p.id">
+              <button
+                v-if="p.id !== winnerIndex"
+                type="button"
+                @click="baoPlayerIndex = p.id"
+                class="py-1.5 text-xs font-bold rounded-lg border transition-all"
+                :class="baoPlayerIndex === p.id ? 'bg-amber-500 text-table-900 font-black border-amber-400' : 'bg-table-900 text-gray-300 border-table-border'"
+              >
+                {{ p.name }} 包全額
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- 台數勾選 -->
       <div class="mt-4">
         <div class="flex justify-between items-center mb-1.5">
           <label class="text-xs font-semibold text-gray-300">台數勾選 (自訂規則)</label>
           <span class="text-xs font-bold text-gold-400">
-            役種 {{ manualFan }} 台 + 莊台 {{ isDealerBonus ? store.currentDealerFan : 0 }} = 共 {{ totalFan }} 台
+            役種 {{ manualFan }} + 莊 {{ isDealerBonus ? store.currentDealerFan : 0 }} = 共 {{ totalFan }} 台
+            <span v-if="store.maxFanCap > 0 && rawFan > store.maxFanCap" class="text-rose-400 text-[10px] ml-1">(已觸發{{ store.maxFanCap }}台滿貫封頂)</span>
           </span>
         </div>
 
-        <div class="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-1 bg-table-900/50 rounded-xl border border-table-border/50">
+        <div class="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1.5 bg-table-900/50 rounded-xl border border-table-border/50">
           <button
             v-for="rule in store.activeFanRules"
             :key="rule.id"
@@ -134,7 +177,7 @@ function handleSettle() {
         </div>
 
         <div class="flex items-center justify-between mt-2 px-1">
-          <span class="text-[11px] text-gray-400">手動增減微調台數：</span>
+          <span class="text-[11px] text-gray-400">手動微調增減台數：</span>
           <div class="flex items-center gap-2">
             <button
               type="button"
@@ -155,13 +198,14 @@ function handleSettle() {
         </div>
       </div>
 
+      <!-- 即時金額試算 -->
       <div class="mt-4 bg-table-900/90 border border-table-border p-4 rounded-2xl flex items-center justify-between">
         <div>
-          <div class="text-xs text-gray-400">單家應付</div>
-          <div class="text-base font-bold text-gray-200">{{ singlePay }} 元</div>
+          <div class="text-xs text-gray-400">{{ isBaoPai ? '包牌者應付' : '單家應付' }}</div>
+          <div class="text-base font-bold text-gray-200">{{ isBaoPai ? totalIncome : singlePay }} 元</div>
         </div>
         <div class="text-right">
-          <div class="text-xs text-gray-400">贏家實收金額</div>
+          <div class="text-xs text-gray-400">贏家總實收</div>
           <div class="text-2xl font-black text-emerald-400 font-mono">+{{ totalIncome }} 元</div>
         </div>
       </div>

@@ -34,13 +34,18 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records.value));
   }
 
-  // 從 Supabase 取得雲端歷史戰績
+  function clearRecordsOnSignOut() {
+    records.value = [];
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
   async function fetchCloudRecords() {
     if (!authStore.user) return;
     try {
       const { data, error } = await supabase
         .from('mahjong_records')
         .select('*')
+        .eq('user_id', authStore.user.id)
         .order('played_at', { ascending: false });
 
       if (error) {
@@ -48,16 +53,16 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
         return;
       }
 
-      if (data && data.length > 0) {
+      if (data) {
         records.value = data.map((item: any) => ({
           id: item.id,
           date: item.played_at.slice(0, 16),
-          baseScore: Number(item.base_score),
-          pointScore: Number(item.point_score),
-          rounds: Number(item.rounds),
-          amount: Number(item.amount),
+          baseScore: Number(item.base_score) || 0,
+          pointScore: Number(item.point_score) || 0,
+          rounds: Number(item.rounds) || 1,
+          amount: Number(item.amount) || 0,
           location: item.location || '現場牌桌',
-          tags: item.tags || [],
+          tags: Array.isArray(item.tags) ? item.tags : [],
           notes: item.notes || '',
           createdAt: new Date(item.created_at).getTime()
         }));
@@ -75,12 +80,8 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
 
     return records.value.filter((r) => {
       const d = new Date(r.date);
-      if (currentTimeRange.value === 'year') {
-        return d.getFullYear() === currentYear;
-      }
-      if (currentTimeRange.value === 'month') {
-        return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
-      }
+      if (currentTimeRange.value === 'year') return d.getFullYear() === currentYear;
+      if (currentTimeRange.value === 'month') return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
       return true;
     });
   });
@@ -213,6 +214,55 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
       .sort((a, b) => b.profit - a.profit);
   });
 
+  const stakeStats = computed(() => {
+    const map = new Map<string, { matches: number; profit: number; wins: number }>();
+    filteredByTimeRecords.value.forEach((r) => {
+      const key = `${r.baseScore}/${r.pointScore}`;
+      const cur = map.get(key) || { matches: 0, profit: 0, wins: 0 };
+      const amt = Number(r.amount) || 0;
+      cur.matches += 1;
+      cur.profit += amt;
+      if (amt > 0) cur.wins += 1;
+      map.set(key, cur);
+    });
+
+    return Array.from(map.entries())
+      .map(([stake, stat]) => ({
+        stake,
+        matches: stat.matches,
+        profit: stat.profit,
+        winRate: (stat.wins / stat.matches) * 100
+      }))
+      .sort((a, b) => b.matches - a.matches);
+  });
+
+  const friendStats = computed(() => {
+    const map = new Map<string, { matches: number; profit: number; wins: number }>();
+    filteredByTimeRecords.value.forEach((r) => {
+      const amt = Number(r.amount) || 0;
+      const candidates = (r.tags || []).filter(
+        (t) => !t.includes('台') && !t.includes('家') && !t.includes('局') && !t.includes('座次')
+      );
+
+      candidates.forEach((name) => {
+        const cur = map.get(name) || { matches: 0, profit: 0, wins: 0 };
+        cur.matches += 1;
+        cur.profit += amt;
+        if (amt > 0) cur.wins += 1;
+        map.set(name, cur);
+      });
+    });
+
+    return Array.from(map.entries())
+      .map(([name, stat]) => ({
+        name,
+        matches: stat.matches,
+        profit: stat.profit,
+        winRate: (stat.wins / stat.matches) * 100
+      }))
+      .sort((a, b) => b.profit - a.profit);
+  });
+
   async function addRecord(record: Omit<MahjongRecord, 'id' | 'createdAt'>) {
     const tempId = 'rec-' + Date.now();
     const newEntry: MahjongRecord = {
@@ -228,7 +278,6 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
     records.value.unshift(newEntry);
     saveToStorage();
 
-    // 寫入 Supabase
     if (authStore.user) {
       try {
         const payload = {
@@ -249,14 +298,12 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
           .select()
           .single();
 
-        if (error) {
-          console.error('寫入 Supabase mahjong_records 失敗:', error);
-        } else if (data) {
+        if (!error && data) {
           newEntry.id = data.id;
           saveToStorage();
         }
       } catch (err) {
-        console.error('儲存紀錄網路請求錯誤:', err);
+        console.error('儲存紀錄網路異常:', err);
       }
     }
   }
@@ -275,19 +322,23 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
       saveToStorage();
 
       if (authStore.user && !id.startsWith('rec-')) {
-        await supabase
-          .from('mahjong_records')
-          .update({
-            played_at: new Date(updated.date).toISOString(),
-            base_score: Number(updated.baseScore),
-            point_score: Number(updated.pointScore),
-            rounds: Number(updated.rounds),
-            amount: Number(updated.amount),
-            location: updated.location,
-            tags: updated.tags,
-            notes: updated.notes
-          })
-          .eq('id', id);
+        try {
+          await supabase
+            .from('mahjong_records')
+            .update({
+              played_at: new Date(updated.date).toISOString(),
+              base_score: Number(updated.baseScore),
+              point_score: Number(updated.pointScore),
+              rounds: Number(updated.rounds),
+              amount: Number(updated.amount),
+              location: updated.location,
+              tags: updated.tags,
+              notes: updated.notes
+            })
+            .eq('id', id);
+        } catch (err) {
+          console.error('更新 Supabase 紀錄失敗:', err);
+        }
       }
     }
   }
@@ -297,7 +348,11 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
     saveToStorage();
 
     if (authStore.user && !id.startsWith('rec-')) {
-      await supabase.from('mahjong_records').delete().eq('id', id);
+      try {
+        await supabase.from('mahjong_records').delete().eq('id', id);
+      } catch (err) {
+        console.error('刪除 Supabase 紀錄失敗:', err);
+      }
     }
   }
 
@@ -350,7 +405,7 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
         return true;
       }
     } catch (e) {
-      console.error(e);
+      console.error('匯入 JSON 格式無效:', e);
     }
     return false;
   }
@@ -362,7 +417,10 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
     stats,
     trendPoints,
     locationStats,
+    stakeStats,
+    friendStats,
     fetchCloudRecords,
+    clearRecordsOnSignOut,
     addRecord,
     updateRecord,
     deleteRecord,

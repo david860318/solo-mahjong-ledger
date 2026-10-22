@@ -1,13 +1,13 @@
 export interface MahjongRecord {
   id: string;
-  date: string;            // YYYY-MM-DDTHH:mm
-  baseScore: number;       // 底 (e.g. 50, 100)
-  pointScore: number;      // 台 (e.g. 20, 30)
-  rounds: number;          // 將數 (e.g. 1, 2)
-  amount: number;          // 淨勝負金額 (+1200, -500)
-  location: string;        // 地點標籤
-  tags: string[];          // 特殊標籤
-  notes?: string;          // 備忘
+  date: string;
+  baseScore: number;
+  pointScore: number;
+  rounds: number;
+  amount: number;
+  location: string;
+  tags: string[];
+  notes?: string;
   createdAt: number;
 }
 
@@ -29,7 +29,7 @@ export interface MahjongStats {
 export type WindType = '東' | '南' | '西' | '北';
 
 export interface Player {
-  id: number;              // 0: 東, 1: 南, 2: 西, 3: 北
+  id: number;
   name: string;
   score: number;
 }
@@ -48,8 +48,9 @@ export interface RoundLog {
   dealerIndex: number;
   dealerStreak: number;
   winnerIndex: number;
-  loserIndex: number;
+  loserIndex: number; // -1: 自摸, 0~3: 放槍者
   isSelfDrawn: boolean;
+  isBaoPai?: boolean; // 是否為包牌（一人承擔全額）
   baseScore: number;
   pointScore: number;
   fanCount: number;
@@ -59,4 +60,12 @@ export interface RoundLog {
   prevWindIndex: number;
   prevDealerIndex: number;
   prevDealerStreak: number;
+}
+
+export interface UserProfile {
+  id: string;
+  display_name: string;
+  avatar_url?: string;
+  preferred_base: number;
+  preferred_point: number;
 }
