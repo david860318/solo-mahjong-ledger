@@ -9,26 +9,26 @@ export const useAuthStore = defineStore('auth', () => {
   const profile = ref<UserProfile | null>(null);
   const loading = ref(true);
 
-// 1. 取得頭像 URL（支援 Google OAuth 頭像）
+  // 1. 深度解析 Google 或自訂頭像
   const avatarUrl = computed(() => {
     if (profile.value?.avatar_url) return profile.value.avatar_url;
     const meta = user.value?.user_metadata;
     return meta?.avatar_url || meta?.picture || '';
   });
 
-  // 2. 健壯的使用者名稱萃取：自訂 profile -> Google full_name -> Google name -> Email 前綴 -> 雀友
+  // 2. 深度解析顯示名稱
   const currentDisplayName = computed(() => {
     if (profile.value?.display_name && profile.value.display_name.trim()) {
       return profile.value.display_name.trim();
     }
     const meta = user.value?.user_metadata;
-    if (meta?.full_name?.trim()) return meta.full_name.trim();
-    if (meta?.name?.trim()) return meta.name.trim();
+    if (meta?.full_name && meta.full_name.trim()) return meta.full_name.trim();
+    if (meta?.name && meta.name.trim()) return meta.name.trim();
     if (user.value?.email) return user.value.email.split('@')[0];
-    return '麻將雀友';
+    return '雀友';
   });
 
-  // 3. 抓取或自動初始化 Profile
+  // 3. 抓取或自動建立 Profile
   async function fetchProfile() {
     if (!user.value) {
       profile.value = null;
@@ -51,10 +51,9 @@ export const useAuthStore = defineStore('auth', () => {
           preferred_point: Number(data.preferred_point) || 30
         };
       } else {
-        // 若 profiles 還沒有這筆資料，自動初始化
+        // 資料庫尚未存在紀錄時，自動補入
         const initialName = currentDisplayName.value;
         const initialAvatar = avatarUrl.value;
-
         const newProfile = {
           id: user.value.id,
           display_name: initialName,
@@ -78,7 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 4. 更新基本資料
+  // 4. 更新 Profile
   async function updateProfile(displayName: string, preferredBase: number, preferredPoint: number) {
     if (!user.value) throw new Error('尚未登入');
 
@@ -100,7 +99,7 @@ export const useAuthStore = defineStore('auth', () => {
     profile.value = {
       id: user.value.id,
       display_name: cleanName,
-      avatar_url: profile.value?.avatar_url || '',
+      avatar_url: profile.value?.avatar_url || avatarUrl.value,
       preferred_base: cleanBase,
       preferred_point: cleanPoint
     };
@@ -110,38 +109,33 @@ export const useAuthStore = defineStore('auth', () => {
     });
   }
 
-  // 修改登入密碼
   async function updatePassword(newPassword: string) {
     if (!user.value) throw new Error('尚未登入');
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
   }
 
-  // 初始化與監聽 Auth 狀態
- async function init() {
-    loading.value = true;
-    try {
-      const { data } = await supabase.auth.getUser();
-      user.value = data?.user ?? null;
-      if (user.value) {
-        await fetchProfile();
-      }
+  // 5. 初始化驗證
+async function init() {
+  loading.value = true;
+  try {
+    // 務必使用 getSession()，不要使用 getUser()
+    const { data: { session }, error } = await supabase.auth.getSession();
 
-      supabase.auth.onAuthStateChange(async (_event, session) => {
-        user.value = session?.user ?? null;
-        if (user.value) {
-          await fetchProfile();
-        } else {
-          profile.value = null;
-        }
-      });
-    } catch (e) {
+    if (error || !session) {
       user.value = null;
       profile.value = null;
-    } finally {
-      loading.value = false;
+    } else {
+      user.value = session.user;
+      await fetchProfile();
     }
+  } catch (e) {
+    user.value = null;
+    profile.value = null;
+  } finally {
+    loading.value = false;
   }
+}
 
   async function signUpWithEmail(email: string, password: string, displayName: string) {
     const { data, error } = await supabase.auth.signUp({
@@ -166,13 +160,19 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function signInWithGoogle() {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin }
-    });
-    if (error) throw error;
-    return data;
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      // 確保 redirectTo 與 Supabase Site URL 嚴格一致
+      redirectTo: window.location.origin
+    }
+  });
+  if (error) {
+    console.error('Google 登入調用失敗:', error);
+    throw error;
   }
+  return data;
+}
 
   async function signOut() {
     const { error } = await supabase.auth.signOut();

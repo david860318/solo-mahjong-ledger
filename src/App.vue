@@ -20,7 +20,6 @@ import LoginView from './components/LoginView.vue';
 import { formatCurrency, generateLineReport } from './utils/formatters';
 import { supabase } from './utils/supabase';
 
-// 控制主分頁 ('live' | 'ledger') 與 是否展示全螢幕登入頁
 const currentTab = ref<'ledger' | 'live'>('live');
 const isLoginPage = ref(false);
 
@@ -50,47 +49,50 @@ async function handleSignOut() {
   if (window.confirm('確定要登出帳號嗎？')) {
     await authStore.signOut();
     store.clearRecordsOnSignOut();
-    isLoginPage.value = true; // 登出後直接帶回專屬登入頁
+    isLoginPage.value = true;
   }
 }
 
-// 在 App.vue 的 script setup 區塊修改 onMounted：
-
 onMounted(async () => {
-  // 1. 如果網址帶有 OAuth 回傳的 Hash，先不急著判定未登入，等待 SDK 解析
-  const isOAuthCallback = window.location.hash.includes('access_token=') || window.location.search.includes('code=');
+  // 1. 如果網址帶有 OAuth 回傳的 Hash 或 Code，代表正在轉跳回呼中，先不要開登入頁
+  const isOAuthCallback = 
+    window.location.hash.includes('access_token=') || 
+    window.location.search.includes('code=');
+
   if (isOAuthCallback) {
-    isLoginPage.value = false; // 暫時不彈出登入頁，等待解析完成
-  }
-
-  // 2. 初始化認證狀態
-  await authStore.init();
-
-  if (authStore.user) {
     isLoginPage.value = false;
-    await syncAllData();
-  } else if (!isOAuthCallback) {
-    // 只有在不是 OAuth 回調且真的沒登入的情況下，才進登入頁
-    isLoginPage.value = true;
   }
 
-  // 3. 監聽 Session 建立（Google 登入完成的關鍵點）
+  // 2. 註冊 Session 狀態監聽器（Google 登入回跳成功時會第一時間觸發）
   supabase.auth.onAuthStateChange(async (event, session) => {
+    console.log('Auth 狀態變更:', event, session?.user?.email);
+
     if (session?.user) {
       authStore.user = session.user;
       await authStore.fetchProfile();
-      isLoginPage.value = false; // 登入成功，立即關閉登入頁
+      isLoginPage.value = false; // 登入成功，關閉登入頁
       await syncAllData();
 
-      // 清除網址列醜醜的 Hash Token（選用）
+      // 清除網址列多餘的 hash token
       if (window.location.hash.includes('access_token=')) {
         window.history.replaceState(null, '', window.location.pathname);
       }
     } else if (event === 'SIGNED_OUT') {
+      authStore.user = null;
+      authStore.profile = null;
       store.clearRecordsOnSignOut();
       isLoginPage.value = true;
     }
   });
+
+  // 3. 執行本地初次檢查
+  await authStore.init();
+  if (authStore.user) {
+    isLoginPage.value = false;
+    await syncAllData();
+  } else if (!isOAuthCallback) {
+    isLoginPage.value = true;
+  }
 });
 
 const filteredRecords = computed(() => {
@@ -143,16 +145,16 @@ function handleFileImport(e: Event) {
 </script>
 
 <template>
-  <!-- 1. 全螢幕專屬登入頁面 -->
+  <!-- 全螢幕登入畫面 -->
   <LoginView 
     v-if="isLoginPage" 
     @login-success="isLoginPage = false" 
     @skip-guest="isLoginPage = false" 
   />
 
-  <!-- 2. 主應用程式畫面 (牌桌計分與個人帳本) -->
+  <!-- 主應用介面 -->
   <div v-else class="max-w-4xl mx-auto px-4 py-6 pb-32">
-    <!-- 頂端 Header -->
+    <!-- Header -->
     <header class="flex flex-wrap items-center justify-between gap-4 mb-6">
       <div>
         <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-gold-400 to-amber-300 flex items-center gap-2">
@@ -162,45 +164,44 @@ function handleFileImport(e: Event) {
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- 已登入：顯示玩家頭像稱號 (點擊開啟個人資料設定) -->
+        <!-- 已登入：展示個人頭像與暱稱按鈕 -->
         <div v-if="authStore.user" class="flex items-center gap-1 bg-table-800 border border-table-border p-1 pr-2 rounded-2xl shadow-md">
-  <button
-    @click="showProfileModal = true"
-    class="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-table-700 text-gray-200 hover:text-gold-400 transition-all"
-    title="點擊修改個人稱號與底台"
-  >
-    <!-- 若有 Google 頭像顯示圖片，若無顯示名字首字 -->
-    <div class="w-7 h-7 rounded-full bg-gold-500/20 border border-gold-500/50 overflow-hidden flex items-center justify-center shrink-0">
-      <img
-        v-if="authStore.avatarUrl"
-        :src="authStore.avatarUrl"
-        alt="頭像"
-        class="w-full h-full object-cover"
-        referrerpolicy="no-referrer"
-      />
-      <span v-else class="text-xs font-black text-gold-400">
-        {{ authStore.currentDisplayName ? authStore.currentDisplayName.slice(0, 1) : '🀄' }}
-      </span>
-    </div>
+          <button
+            @click="showProfileModal = true"
+            class="flex items-center gap-2 px-2.5 py-1 rounded-xl hover:bg-table-700 text-gray-200 hover:text-gold-400 transition-all"
+            title="點擊修改個人稱號與底台"
+          >
+            <!-- 圓形頭像容器 (支援 Google 大頭貼圖片) -->
+            <div class="w-7 h-7 rounded-full bg-gold-500/20 border border-gold-500/50 overflow-hidden flex items-center justify-center shrink-0">
+              <img
+                v-if="authStore.avatarUrl"
+                :src="authStore.avatarUrl"
+                alt="頭像"
+                class="w-full h-full object-cover"
+                referrerpolicy="no-referrer"
+              />
+              <span v-else class="text-xs font-black text-gold-400">
+                {{ authStore.currentDisplayName ? authStore.currentDisplayName.slice(0, 1) : '🀄' }}
+              </span>
+            </div>
 
-    <!-- 玩家名稱 -->
-    <span class="font-bold text-xs truncate max-w-[100px] sm:max-w-[130px]">
-      {{ authStore.currentDisplayName }}
-    </span>
-    <Settings2 class="w-3.5 h-3.5 text-gray-400 shrink-0" />
-  </button>
-  
-  <!-- 登出按鈕 -->
-  <button 
-    @click="handleSignOut" 
-    class="text-gray-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-table-700/60 transition-colors ml-0.5" 
-    title="登出帳號"
-  >
-    <LogOut class="w-3.5 h-3.5" />
-  </button>
-</div>
+            <!-- 顯示名稱 -->
+            <span class="font-bold text-xs truncate max-w-[100px] sm:max-w-[130px]">
+              {{ authStore.currentDisplayName }}
+            </span>
+            <Settings2 class="w-3.5 h-3.5 text-gray-400 shrink-0" />
+          </button>
+          
+          <button 
+            @click="handleSignOut" 
+            class="text-gray-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-table-700/60 transition-colors ml-0.5" 
+            title="登出帳號"
+          >
+            <LogOut class="w-3.5 h-3.5" />
+          </button>
+        </div>
 
-        <!-- 訪客/未登入狀態：點擊前往登入頁面 -->
+        <!-- 訪客/未登入狀態：進入登入頁 -->
         <button
           v-else
           @click="isLoginPage = true"
@@ -209,7 +210,7 @@ function handleFileImport(e: Event) {
           <LogIn class="w-3.5 h-3.5" /> 登入 / 註冊
         </button>
 
-        <!-- 模式切換 Tabs -->
+        <!-- 模式切換 -->
         <div class="flex bg-table-800 border border-table-border p-1 rounded-2xl">
           <button
             @click="currentTab = 'live'"
@@ -313,7 +314,7 @@ function handleFileImport(e: Event) {
 
       <TrendChart :data="store.trendPoints" />
 
-      <!-- 三大深度切片數據 -->
+      <!-- 三大深度數據切片 -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div class="bg-table-800/80 border border-table-border p-4 rounded-xl shadow-lg">
           <div class="flex items-center gap-1.5 text-xs font-bold text-gold-400 mb-2">
