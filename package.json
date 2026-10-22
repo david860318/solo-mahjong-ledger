@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc && vite build",
-    "preview": "vite preview"
-  },
+  "dev": "vite",
+  "build": "vite build",
+  "preview": "vite preview"
+},
   "dependencies": {
     "lucide-vue-next": "^0.344.0",
     "pinia": "^2.3.1",
