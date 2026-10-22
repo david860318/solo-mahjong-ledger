@@ -84,8 +84,6 @@ async function copyTableBill() {
   alert('對帳單已成功複製至剪貼簿！可直接貼在 LINE 群組結算。');
 }
 
-// 依照真實牌桌視角旋轉：以「我」(mySeatIndex) 坐在正下方為基準
-// 逆時針順序：自座位(下) -> 下家(右) -> 對家(上) -> 上家(左)
 const tableSeats = computed(() => {
   const myIdx = liveStore.mySeatIndex;
   const getPlayer = (offset: number) => {
@@ -101,16 +99,15 @@ const tableSeats = computed(() => {
 
   return {
     bottom: getPlayer(0), // 我 (本家)
-    right:  getPlayer(1), // 下家 (我的右手邊)
+    right:  getPlayer(1), // 下家 (右手邊)
     top:    getPlayer(2), // 對家 (正對面)
-    left:   getPlayer(3)  // 上家 (我的左手邊)
+    left:   getPlayer(3)  // 上家 (左手邊)
   };
 });
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- 牌桌設定與局況資訊列 -->
     <div class="bg-table-800/90 border border-table-border p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-lg">
       <div class="flex flex-wrap items-center gap-2">
         <button
@@ -162,10 +159,8 @@ const tableSeats = computed(() => {
       </div>
     </div>
 
-    <!-- 牌桌畫面：依真實視角（我永遠在下方，依摸打次序排列上下家與對家） -->
+    <!-- 牌桌畫面 (我永遠在正下方) -->
     <div class="relative bg-gradient-to-b from-[#144231] to-[#0c2a1f] border-4 border-table-border rounded-3xl p-6 sm:p-10 shadow-2xl overflow-hidden min-h-[380px] flex items-center justify-center">
-      
-      <!-- 牌桌中央核心盤 -->
       <div class="text-center z-10 p-5 rounded-2xl bg-table-900/85 border border-table-border/80 backdrop-blur shadow-2xl">
         <div class="text-xs text-gray-400">當前莊家</div>
         <div class="text-2xl font-black text-gold-400 mt-0.5">
@@ -195,7 +190,7 @@ const tableSeats = computed(() => {
         </div>
       </div>
 
-      <!-- 上家 (左手邊 / 摸打來源) -->
+      <!-- 上家 (左手邊 / 上方順序) -->
       <div class="absolute left-4 top-1/2 -translate-y-1/2 text-center">
         <div class="player-pill" :class="{ 'dealer-active': tableSeats.left.isDealer }">
           <div class="flex items-center gap-1.5">
@@ -225,7 +220,7 @@ const tableSeats = computed(() => {
         </div>
       </div>
 
-      <!-- 下家 (右手邊 / 摸打方向) -->
+      <!-- 下家 (右手邊) -->
       <div class="absolute right-4 top-1/2 -translate-y-1/2 text-center">
         <div class="player-pill" :class="{ 'dealer-active': tableSeats.right.isDealer }">
           <div class="flex items-center gap-1.5">
@@ -241,7 +236,7 @@ const tableSeats = computed(() => {
       </div>
     </div>
 
-    <!-- 牌局結束結轉至個人帳本 -->
+    <!-- 儲存戰果 -->
     <div class="bg-table-800/80 border border-table-border p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
       <div>
         <div class="text-sm font-bold text-gray-200">打完要保存戰果了嗎？</div>
@@ -265,7 +260,7 @@ const tableSeats = computed(() => {
       </div>
     </div>
 
-    <!-- 歷史明細明細表 -->
+    <!-- 本桌對戰明細 -->
     <div class="space-y-3">
       <div class="flex items-center justify-between">
         <h3 class="text-sm font-bold text-gray-200">本桌明細 (共 {{ liveStore.logs.length }} 把)</h3>
@@ -303,7 +298,7 @@ const tableSeats = computed(() => {
       </div>
     </div>
 
-    <!-- 牌桌底台與座次設定彈窗 -->
+    <!-- 牌桌設定彈窗 -->
     <div v-if="showSettingsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div class="bg-table-800 border border-table-border w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4">
         <div class="flex items-center justify-between pb-3 border-b border-table-border">
@@ -378,10 +373,7 @@ const tableSeats = computed(() => {
       </div>
     </div>
 
-    <!-- 自定義台數規則彈窗 -->
     <FanRuleManagerModal v-if="showFanRuleModal" @close="showFanRuleModal = false" />
-
-    <!-- 胡牌結算彈窗 -->
     <LiveSettleModal v-if="showSettleModal" @close="showSettleModal = false" />
   </div>
 </template>

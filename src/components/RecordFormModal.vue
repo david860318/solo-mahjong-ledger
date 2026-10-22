@@ -36,7 +36,6 @@ const form = reactive({
   notes: ''
 });
 
-// 若傳入編輯資料，則載入該資料
 watch(
   () => props.editRecord,
   (rec) => {
@@ -95,7 +94,6 @@ function handleSubmit() {
       </div>
 
       <form @submit.prevent="handleSubmit" class="space-y-4 mt-4">
-        <!-- 個人淨損益輸入區塊 -->
         <div class="bg-table-900/80 p-4 rounded-2xl border border-table-border">
           <label class="block text-xs font-semibold text-gray-300 text-center mb-1">個人淨損益 (NTD)</label>
           <input
@@ -116,7 +114,6 @@ function handleSubmit() {
           </div>
         </div>
 
-        <!-- 底 / 台 快捷規格 -->
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1.5">底 / 台 規格</label>
           <div class="grid grid-cols-5 gap-1.5">
@@ -135,7 +132,6 @@ function handleSubmit() {
           </div>
         </div>
 
-        <!-- 打幾將 & 地點 -->
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-gray-300 mb-1">將數 (Rounds)</label>
@@ -159,7 +155,6 @@ function handleSubmit() {
           </div>
         </div>
 
-        <!-- 地點選擇與輸入 -->
         <div>
           <div class="flex justify-between items-center mb-1">
             <label class="block text-xs font-semibold text-gray-300">牌局地點</label>
@@ -178,12 +173,11 @@ function handleSubmit() {
           <input
             v-model="form.location"
             type="text"
-            placeholder="如：朋友家、某某雀莊"
+            placeholder="如：朋友家、雀莊"
             class="w-full bg-table-900 border border-table-border rounded-xl px-3 py-2 text-sm text-gray-200 outline-none focus:border-gold-500"
           />
         </div>
 
-        <!-- 牌型標籤 -->
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1.5">精彩牌型與事件</label>
           <div class="flex flex-wrap gap-1.5">
@@ -203,7 +197,6 @@ function handleSubmit() {
           </div>
         </div>
 
-        <!-- 備忘筆記 -->
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">牌局備忘錄 (選填)</label>
           <input
@@ -216,7 +209,7 @@ function handleSubmit() {
 
         <button
           type="submit"
-          class="w-full mt-4 py-3 bg-gradient-to-r from-gold-500 to-amber-500 hover:from-gold-400 hover:to-amber-400 text-table-900 font-black rounded-xl transition-all shadow-lg shadow-gold-500/20 active:scale-[0.98]"
+          class="w-full mt-4 py-3 bg-gradient-to-r from-gold-500 to-amber-500 hover:from-gold-400 text-table-900 font-black rounded-xl transition-all shadow-lg active:scale-[0.98]"
         >
           {{ editRecord ? '儲存修改' : '確認儲存戰績' }}
         </button>

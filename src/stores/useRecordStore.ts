@@ -1,20 +1,21 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { MahjongRecord, MahjongStats } from '../types/mahjong';
+import { supabase } from '../utils/supabase';
+import { useAuthStore } from './useAuthStore';
 
 const STORAGE_KEY = 'solo_mahjong_records_v1';
-
 export type TimeRange = 'all' | 'year' | 'month';
 
 export const useRecordStore = defineStore('mahjongRecords', () => {
   const records = ref<MahjongRecord[]>([]);
   const currentTimeRange = ref<TimeRange>('all');
+  const authStore = useAuthStore();
 
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      // 強制將舊資料的數值轉型，防止髒資料污染
       records.value = Array.isArray(parsed)
         ? parsed.map((r: any) => ({
             ...r,
@@ -31,6 +32,40 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
 
   function saveToStorage() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records.value));
+  }
+
+  // 從 Supabase 取得雲端歷史戰績
+  async function fetchCloudRecords() {
+    if (!authStore.user) return;
+    try {
+      const { data, error } = await supabase
+        .from('mahjong_records')
+        .select('*')
+        .order('played_at', { ascending: false });
+
+      if (error) {
+        console.error('抓取雲端紀錄失敗:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        records.value = data.map((item: any) => ({
+          id: item.id,
+          date: item.played_at.slice(0, 16),
+          baseScore: Number(item.base_score),
+          pointScore: Number(item.point_score),
+          rounds: Number(item.rounds),
+          amount: Number(item.amount),
+          location: item.location || '現場牌桌',
+          tags: item.tags || [],
+          notes: item.notes || '',
+          createdAt: new Date(item.created_at).getTime()
+        }));
+        saveToStorage();
+      }
+    } catch (e) {
+      console.error('連線 Supabase 異常:', e);
+    }
   }
 
   const filteredByTimeRecords = computed(() => {
@@ -87,7 +122,6 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
     list.forEach((r) => {
       const amt = Number(r.amount) || 0;
       const rds = Number(r.rounds) || 1;
-
       totalProfit += amt;
       totalRounds += rds;
 
@@ -102,7 +136,6 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
     const winRate = totalMatches > 0 ? (winMatches / totalMatches) * 100 : 0;
     const expectedValuePerRound = totalRounds > 0 ? totalProfit / totalRounds : 0;
 
-    // 計算連勝/連敗
     const chronological = [...list].sort(
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
     );
@@ -180,21 +213,55 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
       .sort((a, b) => b.profit - a.profit);
   });
 
-  function addRecord(record: Omit<MahjongRecord, 'id' | 'createdAt'>) {
+  async function addRecord(record: Omit<MahjongRecord, 'id' | 'createdAt'>) {
+    const tempId = 'rec-' + Date.now();
     const newEntry: MahjongRecord = {
       ...record,
       amount: Number(record.amount) || 0,
       rounds: Number(record.rounds) || 1,
       baseScore: Number(record.baseScore) || 0,
       pointScore: Number(record.pointScore) || 0,
-      id: 'rec-' + Date.now(),
+      id: tempId,
       createdAt: Date.now()
     };
+
     records.value.unshift(newEntry);
     saveToStorage();
+
+    // 寫入 Supabase
+    if (authStore.user) {
+      try {
+        const payload = {
+          user_id: authStore.user.id,
+          played_at: new Date(newEntry.date).toISOString(),
+          base_score: newEntry.baseScore,
+          point_score: newEntry.pointScore,
+          rounds: newEntry.rounds,
+          amount: newEntry.amount,
+          location: newEntry.location || '現場牌桌',
+          tags: newEntry.tags || [],
+          notes: newEntry.notes || ''
+        };
+
+        const { data, error } = await supabase
+          .from('mahjong_records')
+          .insert(payload)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('寫入 Supabase mahjong_records 失敗:', error);
+        } else if (data) {
+          newEntry.id = data.id;
+          saveToStorage();
+        }
+      } catch (err) {
+        console.error('儲存紀錄網路請求錯誤:', err);
+      }
+    }
   }
 
-  function updateRecord(id: string, updated: Omit<MahjongRecord, 'id' | 'createdAt'>) {
+  async function updateRecord(id: string, updated: Omit<MahjongRecord, 'id' | 'createdAt'>) {
     const idx = records.value.findIndex((r) => r.id === id);
     if (idx !== -1) {
       records.value[idx] = {
@@ -206,12 +273,32 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
         pointScore: Number(updated.pointScore) || 0
       };
       saveToStorage();
+
+      if (authStore.user && !id.startsWith('rec-')) {
+        await supabase
+          .from('mahjong_records')
+          .update({
+            played_at: new Date(updated.date).toISOString(),
+            base_score: Number(updated.baseScore),
+            point_score: Number(updated.pointScore),
+            rounds: Number(updated.rounds),
+            amount: Number(updated.amount),
+            location: updated.location,
+            tags: updated.tags,
+            notes: updated.notes
+          })
+          .eq('id', id);
+      }
     }
   }
 
-  function deleteRecord(id: string) {
+  async function deleteRecord(id: string) {
     records.value = records.value.filter((r) => r.id !== id);
     saveToStorage();
+
+    if (authStore.user && !id.startsWith('rec-')) {
+      await supabase.from('mahjong_records').delete().eq('id', id);
+    }
   }
 
   function exportJSON() {
@@ -275,6 +362,7 @@ export const useRecordStore = defineStore('mahjongRecords', () => {
     stats,
     trendPoints,
     locationStats,
+    fetchCloudRecords,
     addRecord,
     updateRecord,
     deleteRecord,

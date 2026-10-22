@@ -12,7 +12,7 @@ defineProps<{
     <span class="text-xs font-medium text-gray-400">{{ title }}</span>
     <div class="mt-2 flex items-baseline gap-2">
       <span
-        class="text-2xl font-black"
+        class="text-2xl font-black font-mono tracking-tight"
         :class="{
           'text-gold-400': variant === 'gold',
           'text-emerald-400': variant === 'green',

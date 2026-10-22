@@ -13,7 +13,6 @@ export const formatDate = (dateStr: string): string => {
     .padStart(2, '0')}`;
 };
 
-// 個人戰報文字
 export const generateLineReport = (stats: MahjongStats, latest?: MahjongRecord): string => {
   let text = `🀄 【個人雀歷最新戰報】 🀄\n`;
   if (latest) {
@@ -30,7 +29,6 @@ export const generateLineReport = (stats: MahjongStats, latest?: MahjongRecord):
   return text;
 };
 
-// 牌桌結算對帳單文字
 export const generateTableBill = (
   players: Player[],
   base: number,

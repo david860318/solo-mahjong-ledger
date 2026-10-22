@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { Player, RoundLog, WindType, FanRule } from '../types/mahjong';
+import { supabase } from '../utils/supabase';
+import { useAuthStore } from './useAuthStore';
 
 const WINDS: WindType[] = ['東', '南', '西', '北'];
 const LIVE_TABLE_SETTINGS_KEY = 'live_mahjong_settings_v1';
 const LIVE_FAN_RULES_KEY = 'live_mahjong_fan_rules_v1';
 
-// 台灣正規十六張麻將預設役種台數規則
 export const DEFAULT_FAN_RULES: FanRule[] = [
   { id: 'menqing', name: '門清', fan: 1, enabled: true },
   { id: 'zimo', name: '自摸', fan: 1, enabled: true },
@@ -30,10 +31,11 @@ export const DEFAULT_FAN_RULES: FanRule[] = [
 ];
 
 export const useLiveGameStore = defineStore('liveGame', () => {
-  // 1. 底台與座次
+  const authStore = useAuthStore();
+
   const baseScore = ref<number>(100);
   const pointScore = ref<number>(30);
-  const mySeatIndex = ref<number>(0); // 0: 東, 1: 南, 2: 西, 3: 北
+  const mySeatIndex = ref<number>(0);
 
   const players = ref<Player[]>([
     { id: 0, name: '東家', score: 0 },
@@ -42,16 +44,13 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     { id: 3, name: '北家', score: 0 }
   ]);
 
-  // 2. 自訂台數規則
   const fanRules = ref<FanRule[]>(JSON.parse(JSON.stringify(DEFAULT_FAN_RULES)));
-
-  // 3. 風圈、莊家與局況追蹤
-  const currentWindIndex = ref<number>(0);   // 0: 東風圈, 1: 南風圈, 2: 西風圈, 3: 北風圈
-  const currentDealerIndex = ref<number>(0); // 0~3 當前莊家座次
-  const dealerStreak = ref<number>(0);       // 連莊數 (0: 莊, 1: 連一拉一...)
+  const currentWindIndex = ref<number>(0);
+  const currentDealerIndex = ref<number>(0);
+  const dealerStreak = ref<number>(0);
   const logs = ref<RoundLog[]>([]);
 
-  // 4. 初始化讀取 LocalStorage 快取
+  // 1. 初始化讀取本地快取
   const savedSettings = localStorage.getItem(LIVE_TABLE_SETTINGS_KEY);
   if (savedSettings) {
     try {
@@ -65,7 +64,7 @@ export const useLiveGameStore = defineStore('liveGame', () => {
         });
       }
     } catch (e) {
-      console.error('Failed to parse table settings:', e);
+      console.error(e);
     }
   }
 
@@ -77,35 +76,90 @@ export const useLiveGameStore = defineStore('liveGame', () => {
         fanRules.value = parsedRules;
       }
     } catch (e) {
-      console.error('Failed to parse fan rules:', e);
+      console.error(e);
     }
   }
 
-  // --- Getters / Computed ---
+  // 2. 從 Supabase 載入台數規則與牌桌 Session
+  async function fetchCloudLiveSettings() {
+    if (!authStore.user) return;
 
-  // 當前局名 (例如: 東風東、南風西)
+    try {
+      // 載入自訂台數規則
+      const { data: rulesData } = await supabase
+        .from('user_fan_rules')
+        .select('*');
+
+      if (rulesData && rulesData.length > 0) {
+        fanRules.value = rulesData.map((r: any) => ({
+          id: r.rule_key,
+          name: r.rule_name,
+          fan: Number(r.fan),
+          enabled: r.enabled,
+          isCustom: r.is_custom
+        }));
+        localStorage.setItem(LIVE_FAN_RULES_KEY, JSON.stringify(fanRules.value));
+      }
+
+      // 載入牌桌 Session
+      const { data: sessionData } = await supabase
+        .from('live_game_sessions')
+        .select('*')
+        .eq('user_id', authStore.user.id)
+        .maybeSingle();
+
+      if (sessionData) {
+        baseScore.value = sessionData.base_score;
+        pointScore.value = sessionData.point_score;
+        mySeatIndex.value = sessionData.my_seat_index;
+        currentWindIndex.value = sessionData.current_wind_index;
+        currentDealerIndex.value = sessionData.current_dealer_index;
+        dealerStreak.value = sessionData.dealer_streak;
+        if (Array.isArray(sessionData.players)) players.value = sessionData.players;
+        if (Array.isArray(sessionData.logs)) logs.value = sessionData.logs;
+      }
+    } catch (err) {
+      console.error('載入雲端牌桌狀態失敗:', err);
+    }
+  }
+
+  // 3. 同步當前牌桌狀態至 Supabase
+  async function syncSessionToCloud() {
+    if (!authStore.user) return;
+    try {
+      await supabase.from('live_game_sessions').upsert({
+        user_id: authStore.user.id,
+        base_score: baseScore.value,
+        point_score: pointScore.value,
+        my_seat_index: mySeatIndex.value,
+        current_wind_index: currentWindIndex.value,
+        current_dealer_index: currentDealerIndex.value,
+        dealer_streak: dealerStreak.value,
+        players: players.value,
+        logs: logs.value,
+        updated_at: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error('同步牌桌至雲端失敗:', e);
+    }
+  }
+
   const currentRoundName = computed(() => {
     return `${WINDS[currentWindIndex.value]}風${WINDS[currentDealerIndex.value]}`;
   });
 
-  // 計算莊家台數：連 n 拉 n 相當於 (2n + 1) 台
   const currentDealerFan = computed(() => {
     return dealerStreak.value * 2 + 1;
   });
 
-  // 「我」所在的玩家物件
   const myPlayer = computed(() => {
     return players.value[mySeatIndex.value] || players.value[0];
   });
 
-  // 僅篩選啟用中的台數規則供結算畫面勾選
   const activeFanRules = computed(() => {
     return fanRules.value.filter((r) => r.enabled);
   });
 
-  // --- Actions ---
-
-  // 儲存底台、座次與玩家名稱
   function saveTableSettings(newBase: number, newPoint: number, names: string[], mySeat: number) {
     baseScore.value = Number(newBase) || 0;
     pointScore.value = Number(newPoint) || 0;
@@ -126,25 +180,46 @@ export const useLiveGameStore = defineStore('liveGame', () => {
         playerNames: players.value.map((p) => p.name)
       })
     );
+
+    syncSessionToCloud();
   }
 
-  // 儲存自訂台數清單
-  function saveFanRules(rules: FanRule[]) {
+  async function saveFanRules(rules: FanRule[]) {
     fanRules.value = rules;
     localStorage.setItem(LIVE_FAN_RULES_KEY, JSON.stringify(rules));
+
+    // 同步到 Supabase user_fan_rules
+    if (authStore.user) {
+      try {
+        const rows = rules.map((r) => ({
+          user_id: authStore.user!.id,
+          rule_key: r.id,
+          rule_name: r.name,
+          fan: r.fan,
+          enabled: r.enabled,
+          is_custom: !!r.isCustom
+        }));
+
+        await supabase.from('user_fan_rules').upsert(rows, { onConflict: 'user_id,rule_key' });
+      } catch (err) {
+        console.error('儲存台數規則至雲端失敗:', err);
+      }
+    }
   }
 
-  // 還原為預設台數
-  function resetFanRulesToDefault() {
+  async function resetFanRulesToDefault() {
     fanRules.value = JSON.parse(JSON.stringify(DEFAULT_FAN_RULES));
     localStorage.setItem(LIVE_FAN_RULES_KEY, JSON.stringify(fanRules.value));
+
+    if (authStore.user) {
+      await supabase.from('user_fan_rules').delete().eq('user_id', authStore.user.id);
+      await saveFanRules(fanRules.value);
+    }
   }
 
-  // 下莊遞轉邏輯
   function advanceDealer() {
     dealerStreak.value = 0;
     if (currentDealerIndex.value === 3) {
-      // 北家下莊 -> 過風圈 (東 -> 南 -> 西 -> 北 -> 東)
       currentDealerIndex.value = 0;
       currentWindIndex.value = (currentWindIndex.value + 1) % 4;
     } else {
@@ -152,10 +227,9 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     }
   }
 
-  // 胡牌結算
   function settleRound(payload: {
     winnerIndex: number;
-    loserIndex: number; // -1 表示自摸 (三家付)
+    loserIndex: number;
     fanCount: number;
     tags: string[];
   }) {
@@ -164,11 +238,9 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     const isDealerInvolved =
       winnerIndex === currentDealerIndex.value || loserIndex === currentDealerIndex.value;
 
-    // 計算總台數（若莊家胡牌或放槍，系統自動加上莊家連莊台數）
     const effectiveFan = fanCount + (isDealerInvolved ? currentDealerFan.value : 0);
     const singlePayment = Number(baseScore.value) + effectiveFan * Number(pointScore.value);
 
-    // 建立復原快照 (Deep Copy)
     const snapshotScores = players.value.map((p) => p.score);
     const snapWind = currentWindIndex.value;
     const snapDealer = currentDealerIndex.value;
@@ -177,7 +249,6 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     let amountWon = 0;
 
     if (isSelfDrawn) {
-      // 自摸：其餘三家各付一份
       players.value.forEach((p, idx) => {
         if (idx !== winnerIndex) {
           p.score -= singlePayment;
@@ -186,13 +257,11 @@ export const useLiveGameStore = defineStore('liveGame', () => {
       });
       players.value[winnerIndex].score += amountWon;
     } else {
-      // 放槍：一對一支付
       players.value[loserIndex].score -= singlePayment;
       players.value[winnerIndex].score += singlePayment;
       amountWon = singlePayment;
     }
 
-    // 寫入對戰歷史明細
     logs.value.unshift({
       id: 'round-' + Date.now(),
       windDesc: currentRoundName.value,
@@ -212,22 +281,21 @@ export const useLiveGameStore = defineStore('liveGame', () => {
       prevDealerStreak: snapStreak
     });
 
-    // 局況流轉：莊家胡牌則連莊累加，閒家胡牌則下莊遞轉
     if (winnerIndex === currentDealerIndex.value) {
       dealerStreak.value += 1;
     } else {
       advanceDealer();
     }
+
+    syncSessionToCloud();
   }
 
-  // 流局 / 臭莊
   function passDraw() {
     const snapshotScores = players.value.map((p) => p.score);
     const snapWind = currentWindIndex.value;
     const snapDealer = currentDealerIndex.value;
     const snapStreak = dealerStreak.value;
 
-    // 台灣牌規流局莊家繼續連莊
     dealerStreak.value += 1;
 
     logs.value.unshift({
@@ -248,32 +316,34 @@ export const useLiveGameStore = defineStore('liveGame', () => {
       prevDealerIndex: snapDealer,
       prevDealerStreak: snapStreak
     });
+
+    syncSessionToCloud();
   }
 
-  // 復原上一把 (Undo)
   function undoLastRound(): boolean {
     if (logs.value.length === 0) return false;
     const last = logs.value.shift()!;
 
-    // 還原四家分數
     players.value.forEach((p, idx) => {
       p.score = last.prevScores[idx];
     });
 
-    // 還原風圈、莊家與連莊次數
     currentWindIndex.value = last.prevWindIndex;
     currentDealerIndex.value = last.prevDealerIndex;
     dealerStreak.value = last.prevDealerStreak;
+
+    syncSessionToCloud();
     return true;
   }
 
-  // 重開本桌
   function resetGame() {
     players.value.forEach((p) => (p.score = 0));
     currentWindIndex.value = 0;
     currentDealerIndex.value = 0;
     dealerStreak.value = 0;
     logs.value = [];
+
+    syncSessionToCloud();
   }
 
   return {
@@ -290,6 +360,8 @@ export const useLiveGameStore = defineStore('liveGame', () => {
     currentDealerFan,
     myPlayer,
     activeFanRules,
+    fetchCloudLiveSettings,
+    syncSessionToCloud,
     saveTableSettings,
     saveFanRules,
     resetFanRulesToDefault,

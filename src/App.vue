@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { Plus, Share2, Download, Upload, FileSpreadsheet, MapPin, LayoutDashboard, Disc3 } from 'lucide-vue-next';
+import { ref, computed, onMounted } from 'vue';
+import { Plus, Share2, Download, Upload, FileSpreadsheet, MapPin, LayoutDashboard, Disc3, LogIn, LogOut, UserCheck } from 'lucide-vue-next';
 import { useRecordStore } from './stores/useRecordStore';
+import { useAuthStore } from './stores/useAuthStore';
+import { useLiveGameStore } from './stores/useLiveGameStore';
 import type { MahjongRecord } from './types/mahjong';
 import StatCard from './components/StatCard.vue';
 import TrendChart from './components/TrendChart.vue';
@@ -9,19 +11,46 @@ import RecordCard from './components/RecordCard.vue';
 import RecordFormModal from './components/RecordFormModal.vue';
 import ShareModal from './components/ShareModal.vue';
 import LiveGameView from './components/LiveGameView.vue';
+import AuthModal from './components/AuthModal.vue';
 import { formatCurrency, generateLineReport } from './utils/formatters';
+import { supabase } from './utils/supabase';
 
-const currentTab = ref<'ledger' | 'live'>('live'); // 預設進牌桌計分器
+const currentTab = ref<'ledger' | 'live'>('live');
 
 const store = useRecordStore();
+const authStore = useAuthStore();
+const liveStore = useLiveGameStore();
+
 const showModal = ref(false);
+const showAuthModal = ref(false);
 const editingRecord = ref<MahjongRecord | null>(null);
 const showShareModal = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 
-// 搜尋與篩選
 const searchQuery = ref('');
 const filterStatus = ref<'all' | 'win' | 'loss'>('all');
+
+// 初始與驗證狀態變更時，全自動抓取所有雲端資料
+async function syncAllData() {
+  if (authStore.user) {
+    await Promise.all([
+      store.fetchCloudRecords(),
+      liveStore.fetchCloudLiveSettings()
+    ]);
+  }
+}
+
+onMounted(async () => {
+  await authStore.init();
+  await syncAllData();
+
+  // 監聽登入 / 登出事件 (包括 Google 轉跳完成)
+  supabase.auth.onAuthStateChange(async (_event, session) => {
+    if (session?.user) {
+      await syncAllData();
+    }
+  });
+});
 
 const filteredRecords = computed(() => {
   return store.sortedRecords.filter((r) => {
@@ -85,31 +114,53 @@ function handleFileImport(e: Event) {
         <p class="text-xs text-gray-400 mt-0.5">十六張即時牌桌計分與個人雀歷記帳本</p>
       </div>
 
-      <!-- 導覽頁籤切換 (模式切換) -->
-      <div class="flex bg-table-800 border border-table-border p-1 rounded-2xl">
+      <div class="flex items-center gap-2">
+        <div v-if="authStore.user" class="flex items-center gap-2 bg-table-800 border border-table-border px-3 py-1.5 rounded-xl text-xs">
+          <UserCheck class="w-3.5 h-3.5 text-gold-400" />
+          <span class="text-gray-200 font-semibold truncate max-w-[100px]">
+            {{ authStore.user.user_metadata?.full_name || authStore.user.email?.split('@')[0] }}
+          </span>
+          <button 
+            @click="authStore.signOut" 
+            class="text-gray-400 hover:text-rose-400 ml-1 p-0.5 transition-colors" 
+            title="登出帳號"
+          >
+            <LogOut class="w-3.5 h-3.5" />
+          </button>
+        </div>
+
         <button
-          @click="currentTab = 'live'"
-          class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all"
-          :class="currentTab === 'live' ? 'bg-gold-500 text-table-900 shadow-md' : 'text-gray-400 hover:text-white'"
+          v-else
+          @click="showAuthModal = true"
+          class="bg-table-800 hover:bg-table-700 border border-table-border text-xs font-bold text-gold-400 px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
         >
-          <Disc3 class="w-4 h-4" /> 牌桌即時計分
+          <LogIn class="w-3.5 h-3.5" /> 登入 / 註冊
         </button>
-        <button
-          @click="currentTab = 'ledger'"
-          class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all"
-          :class="currentTab === 'ledger' ? 'bg-gold-500 text-table-900 shadow-md' : 'text-gray-400 hover:text-white'"
-        >
-          <LayoutDashboard class="w-4 h-4" /> 個人戰績帳本
-        </button>
+
+        <div class="flex bg-table-800 border border-table-border p-1 rounded-2xl">
+          <button
+            @click="currentTab = 'live'"
+            class="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-bold transition-all"
+            :class="currentTab === 'live' ? 'bg-gold-500 text-table-900 shadow-md' : 'text-gray-400 hover:text-white'"
+          >
+            <Disc3 class="w-4 h-4" /> 牌桌計分
+          </button>
+          <button
+            @click="currentTab = 'ledger'"
+            class="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-bold transition-all"
+            :class="currentTab === 'ledger' ? 'bg-gold-500 text-table-900 shadow-md' : 'text-gray-400 hover:text-white'"
+          >
+            <LayoutDashboard class="w-4 h-4" /> 雀歷帳本
+          </button>
+        </div>
       </div>
     </header>
 
-    <!-- 模式 1: 沉浸式牌桌即時計分器 -->
+    <!-- 牌桌即時計分器 -->
     <LiveGameView v-if="currentTab === 'live'" @switch-to-ledger="currentTab = 'ledger'" />
 
-    <!-- 模式 2: 個人雀歷帳本與期望值分析 -->
+    <!-- 個人雀歷帳本 -->
     <div v-else class="space-y-6">
-      <!-- 頂部操作按鈕 -->
       <div class="flex items-center justify-between">
         <div class="flex bg-table-800/90 border border-table-border p-1 rounded-xl text-xs">
           <button
@@ -161,7 +212,6 @@ function handleFileImport(e: Event) {
         </div>
       </div>
 
-      <!-- 生涯統計看板 -->
       <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
           title="累計淨勝負"
@@ -187,7 +237,6 @@ function handleFileImport(e: Event) {
         />
       </section>
 
-      <!-- 走勢圖與風水榜 -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="md:col-span-2">
           <TrendChart :data="store.trendPoints" />
@@ -219,7 +268,6 @@ function handleFileImport(e: Event) {
         </div>
       </div>
 
-      <!-- 歷史牌局清單 -->
       <section class="space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 class="text-base font-bold text-gray-200">歷史明細 ({{ filteredRecords.length }})</h2>
@@ -271,7 +319,6 @@ function handleFileImport(e: Event) {
       </section>
     </div>
 
-    <!-- 彈窗群 -->
     <RecordFormModal
       v-if="showModal"
       :edit-record="editingRecord"
@@ -281,6 +328,10 @@ function handleFileImport(e: Event) {
       v-if="showShareModal"
       :report-text="reportText"
       @close="showShareModal = false"
+    />
+    <AuthModal
+      v-if="showAuthModal"
+      @close="showAuthModal = false"
     />
   </div>
 </template>

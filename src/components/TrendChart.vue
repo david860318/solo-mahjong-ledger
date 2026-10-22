@@ -42,7 +42,7 @@ const pathString = computed(() => {
   <div class="w-full bg-table-800/80 border border-table-border p-4 rounded-xl shadow-lg">
     <div class="flex items-center justify-between mb-2">
       <h3 class="text-sm font-semibold text-gray-300">📈 近期淨利走勢 (近 {{ data.length }} 場)</h3>
-      <span class="text-xs text-gray-400">虛線為損益平盤基準</span>
+      <span class="text-xs text-gray-400">虛線為平盤損益基準</span>
     </div>
 
     <div v-if="data.length >= 2" class="relative w-full aspect-[10/3]">
@@ -77,7 +77,7 @@ const pathString = computed(() => {
       </svg>
     </div>
     <div v-else class="h-28 flex items-center justify-center text-xs text-gray-500">
-      記錄超過 2 場後將在此自動繪製淨利折線走勢
+      記錄超過 2 場後將在此繪製淨利折線走勢
     </div>
   </div>
 </template>

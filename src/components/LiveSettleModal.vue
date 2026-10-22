@@ -8,10 +8,9 @@ const emit = defineEmits(['close']);
 const store = useLiveGameStore();
 
 const winnerIndex = ref<number>(0);
-const loserIndex = ref<number>(-1); // -1 代表自摸
+const loserIndex = ref<number>(-1);
 const manualFan = ref<number>(0);
 
-// 已選中的役種 ID
 const selectedRuleIds = ref<string[]>([]);
 
 function toggleRule(rule: FanRule) {
@@ -25,29 +24,24 @@ function toggleRule(rule: FanRule) {
   }
 }
 
-// 產生選中標籤名稱
 const selectedTags = computed(() => {
   return selectedRuleIds.value
     .map((id) => store.fanRules.find((r) => r.id === id)?.name)
     .filter(Boolean) as string[];
 });
 
-// 是否包含莊家台
 const isDealerBonus = computed(() => {
   return winnerIndex.value === store.currentDealerIndex || loserIndex.value === store.currentDealerIndex;
 });
 
-// 當前總台數 (含莊家連莊台)
 const totalFan = computed(() => {
   return manualFan.value + (isDealerBonus.value ? store.currentDealerFan : 0);
 });
 
-// 單家應付金額
 const singlePay = computed(() => {
   return store.baseScore + totalFan.value * store.pointScore;
 });
 
-// 贏家預期實收
 const totalIncome = computed(() => {
   return loserIndex.value === -1 ? singlePay.value * 3 : singlePay.value;
 });
@@ -76,7 +70,6 @@ function handleSettle() {
         </button>
       </div>
 
-      <!-- 誰胡牌 (贏家) -->
       <div class="mt-4">
         <label class="block text-xs font-semibold text-gray-300 mb-1.5">🀄 誰胡牌 (贏家)</label>
         <div class="grid grid-cols-4 gap-2">
@@ -93,7 +86,6 @@ function handleSettle() {
         </div>
       </div>
 
-      <!-- 放槍者 -->
       <div class="mt-4">
         <label class="block text-xs font-semibold text-gray-300 mb-1.5">🎯 放槍者 (若自摸選「自摸」)</label>
         <div class="grid grid-cols-5 gap-1.5">
@@ -119,15 +111,12 @@ function handleSettle() {
         </div>
       </div>
 
-      <!-- 自定義台數勾選區 -->
       <div class="mt-4">
         <div class="flex justify-between items-center mb-1.5">
           <label class="text-xs font-semibold text-gray-300">台數勾選 (自訂規則)</label>
-          <div class="flex items-center gap-1.5">
-            <span class="text-xs font-bold text-gold-400">
-              役種 {{ manualFan }} 台 + 莊台 {{ isDealerBonus ? store.currentDealerFan : 0 }} = 共 {{ totalFan }} 台
-            </span>
-          </div>
+          <span class="text-xs font-bold text-gold-400">
+            役種 {{ manualFan }} 台 + 莊台 {{ isDealerBonus ? store.currentDealerFan : 0 }} = 共 {{ totalFan }} 台
+          </span>
         </div>
 
         <div class="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-1 bg-table-900/50 rounded-xl border border-table-border/50">
@@ -144,7 +133,6 @@ function handleSettle() {
           </button>
         </div>
 
-        <!-- 台數手動微調 -->
         <div class="flex items-center justify-between mt-2 px-1">
           <span class="text-[11px] text-gray-400">手動增減微調台數：</span>
           <div class="flex items-center gap-2">
@@ -167,7 +155,6 @@ function handleSettle() {
         </div>
       </div>
 
-      <!-- 即時金額試算 -->
       <div class="mt-4 bg-table-900/90 border border-table-border p-4 rounded-2xl flex items-center justify-between">
         <div>
           <div class="text-xs text-gray-400">單家應付</div>

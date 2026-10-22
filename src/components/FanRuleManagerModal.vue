@@ -7,10 +7,7 @@ import type { FanRule } from '../types/mahjong';
 const emit = defineEmits(['close']);
 const store = useLiveGameStore();
 
-// 建立可編輯的副本
 const editingRules = ref<FanRule[]>(JSON.parse(JSON.stringify(store.fanRules)));
-
-// 新增自訂役種表單
 const newRuleName = ref('');
 const newRuleFan = ref<number>(1);
 
@@ -47,18 +44,16 @@ function handleResetDefaults() {
 <template>
   <div class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-table-800 border border-table-border w-full max-w-lg rounded-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
-      <!-- 標頭 -->
       <div class="flex items-center justify-between pb-3 border-b border-table-border">
         <div>
           <h3 class="text-base font-bold text-gold-400">自訂麻將台數規則</h3>
-          <p class="text-xs text-gray-400">可自訂台數數值、啟用或停用、新增私人牌規</p>
+          <p class="text-xs text-gray-400">自訂台數數值、啟用或停用、新增私人牌規</p>
         </div>
         <button @click="$emit('close')" class="text-gray-400 hover:text-white p-1">
           <X class="w-5 h-5" />
         </button>
       </div>
 
-      <!-- 規則列表區 (滾動) -->
       <div class="flex-1 overflow-y-auto space-y-2 py-3 my-2 pr-1">
         <div
           v-for="(rule, index) in editingRules"
@@ -67,7 +62,6 @@ function handleResetDefaults() {
           :class="rule.enabled ? 'bg-table-900/90 border-table-border' : 'bg-table-900/40 border-table-border/40 opacity-60'"
         >
           <div class="flex items-center gap-2.5 flex-1">
-            <!-- 開啟/停用 Checkbox -->
             <input
               type="checkbox"
               v-model="rule.enabled"
@@ -78,7 +72,6 @@ function handleResetDefaults() {
           </div>
 
           <div class="flex items-center gap-2">
-            <!-- 台數輸入框 -->
             <div class="flex items-center gap-1">
               <input
                 v-model.number="rule.fan"
@@ -89,7 +82,6 @@ function handleResetDefaults() {
               <span class="text-xs text-gray-400">台</span>
             </div>
 
-            <!-- 若為使用者自訂，可直接刪除 -->
             <button
               v-if="rule.isCustom"
               @click="removeRule(index)"
@@ -102,7 +94,6 @@ function handleResetDefaults() {
         </div>
       </div>
 
-      <!-- 新增自訂役種表單 -->
       <div class="pt-3 border-t border-table-border">
         <label class="block text-xs font-semibold text-gray-300 mb-1.5">➕ 新增自訂牌型 / 特殊役種</label>
         <div class="flex gap-2">
@@ -130,7 +121,6 @@ function handleResetDefaults() {
         </div>
       </div>
 
-      <!-- 底部動作按鈕 -->
       <div class="flex items-center justify-between pt-4 mt-2 border-t border-table-border gap-3">
         <button
           @click="handleResetDefaults"

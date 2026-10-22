@@ -19,7 +19,6 @@ function confirmDelete(e: Event) {
     @click="$emit('edit', record)"
     class="group cursor-pointer bg-table-800/80 hover:bg-table-800 border border-table-border hover:border-gold-500/50 p-4 rounded-2xl flex items-center justify-between gap-4 transition-all shadow-md relative overflow-hidden"
   >
-    <!-- 獲利/虧損左側飾條 -->
     <div
       class="absolute left-0 top-0 bottom-0 w-1.5"
       :class="record.amount > 0 ? 'bg-emerald-400' : record.amount < 0 ? 'bg-rose-400' : 'bg-gray-500'"
@@ -37,7 +36,6 @@ function confirmDelete(e: Event) {
         </span>
       </div>
 
-      <!-- 標籤 -->
       <div v-if="record.tags && record.tags.length > 0" class="flex flex-wrap gap-1">
         <span
           v-for="t in record.tags"
@@ -51,7 +49,6 @@ function confirmDelete(e: Event) {
       <p v-if="record.notes" class="text-xs text-gray-400 italic">{{ record.notes }}</p>
     </div>
 
-    <!-- 右側金額與操作按鈕 -->
     <div class="flex items-center gap-3">
       <div class="text-right">
         <div

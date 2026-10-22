@@ -15,7 +15,7 @@ async function copyToClipboard() {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+  <div class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-table-800 border border-table-border w-full max-w-md rounded-2xl p-6 shadow-2xl">
       <div class="flex items-center justify-between pb-3 border-b border-table-border">
         <h3 class="text-base font-bold text-gold-400">LINE / 社群戰報</h3>
@@ -34,7 +34,7 @@ async function copyToClipboard() {
 
       <button
         @click="copyToClipboard"
-        class="w-full mt-4 py-2.5 bg-gold-500 hover:bg-gold-400 text-table-900 font-bold rounded-xl flex items-center justify-center gap-2 transition-all"
+        class="w-full mt-4 py-2.5 bg-gold-500 hover:bg-gold-400 text-table-900 font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
       >
         <Check v-if="copied" class="w-4 h-4" />
         <Copy v-else class="w-4 h-4" />
